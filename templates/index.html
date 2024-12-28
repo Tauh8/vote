@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>匿名投票系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .container { max-width: 800px; margin-top: 50px; }
+        .card { margin-bottom: 20px; }
+        #results-chart { height: 300px; }
+        .hidden { display: none; }
+        .nav-tabs { margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center mb-4">匿名投票系统</h1>
+        
+        <!-- 管理员控制面板 -->
+        <div class="card" id="admin-panel">
+            <div class="card-header">管理员控制面板</div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col">
+                        <button class="btn btn-primary" onclick="startVoting()">开始投票</button>
+                        <button class="btn btn-danger" onclick="endVoting()">结束投票</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 用户认证区域 -->
+        <div class="card" id="auth-section">
+            <div class="card-header">
+                <ul class="nav nav-tabs card-header-tabs">
+                    <li class="nav-item">
+                        <a class="nav-link active" id="register-tab" data-bs-toggle="tab" href="#register-content">注册</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" id="login-tab" data-bs-toggle="tab" href="#login-content">登录</a>
+                    </li>
+                </ul>
+            </div>
+            <div class="card-body">
+                <div class="tab-content">
+                    <!-- 注册标签页 -->
+                    <div class="tab-pane fade show active" id="register-content">
+                        
+                        <p><strong>实际环境中，一般用可信方式如人脸验证提前注册</strong></p>
+                        <div class="mb-3">
+                            <label for="voter-id" class="form-label">投票者ID</label>
+                            <input type="text" class="form-control" id="voter-id" placeholder="请输入您的投票者ID">
+                        </div>
+                        <button class="btn btn-primary" onclick="registerVoter()">注册</button>
+                    </div>
+                    
+                    <!-- 登录标签页 -->
+                    <div class="tab-pane fade" id="login-content">
+                        <p><strong>实际环境中，在投票服务器上登录</strong></p>
+                        
+                        <!-- 步骤 1：请求挑战 -->
+                        <div id="login-step1">
+                            <div class="mb-3">
+                                <label for="public-key" class="form-label">公钥</label>
+                                <input type="text" class="form-control" id="public-key" placeholder="请输入您的公钥">
+                            </div>
+                            <div class="mb-3">
+                                <label for="commitment" class="form-label">承诺</label>
+                                <input type="text" class="form-control" id="commitment" placeholder="请输入您的承诺">
+                            </div>
+                            <button class="btn btn-primary" onclick="requestChallenge()">请求挑战</button>
+                        </div>
+
+                        <!-- 步骤 2：显示挑战信息并计算证明 -->
+                        <div id="login-step2" class="hidden">
+                            <div class="alert alert-info mb-3">
+                                <p><strong>本地计算Response</strong></p>
+                                <div class="mb-3">
+                                    <label for="private-key" class="form-label">私钥</label>
+                                    <input type="text" class="form-control" id="private-key" placeholder="请输入您的私钥">
+                                </div>
+                                <div class="mb-3">
+                                    <label for="random-k" class="form-label">随机数</label>
+                                    <input type="text" class="form-control" id="random-k" placeholder="请输入您的随机数">
+                                </div>
+                                <!-- <h5>身份验证挑战信息：</h5>
+                                <p><strong>随机数(k):</strong> <span id="random-k"></span></p>
+                                <p><strong>承诺值(R):</strong> <span id="commitment-r"></span></p>
+                                <p><strong>挑战值(c):</strong> <span id="challenge-value"></span></p> -->
+                            </div>
+                            <button class="btn btn-primary" onclick="calculateProof()">计算响应</button>
+                        </div>
+
+                        <!-- 步骤 3：显示证明信息并提交 -->
+                        <div id="login-step3" class="hidden">
+                            <div class="alert alert-info mb-3">
+                                <h5>证明信息：</h5>
+                                <p><strong>证明值(s):</strong> <span id="proof-value"></span></p>
+                            </div>
+                            <button class="btn btn-primary" onclick="submitProof()">发送证明</button>
+                        </div>
+
+                        <!-- 计算过程日志 -->
+                        <div class="mt-3">
+                            <div class="accordion" id="loginStepsAccordion">
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#calculationSteps">
+                                            进度
+                                        </button>
+                                    </h2>
+                                    <div id="calculationSteps" class="accordion-collapse collapse">
+                                        <div class="accordion-body">
+                                            <ol id="calculation-log" class="small">
+                                            </ol>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 注册信息显示 -->
+        <div class="card hidden" id="registration-info">
+            <div class="card-header">注册/登录信息</div>
+            <div class="card-body">
+                <p><strong>投票者ID（真实场景中一般为公民身份证）:</strong> <span id="reg-voter-id"></span></p>
+                <div class="alert alert-warning">
+                    请保存以下信息用于后续登录（私钥和随机值不可泄露，公钥已上传服务器注册）：
+                    <p><strong>随机值 (random_value):</strong> <span id="reg-random-value"></span></p>
+                    <p><strong>承诺 (commitment):</strong> <span id="reg-commitment"></span></p>
+                    <p><strong>私钥:</strong> <span id="reg-private-key"></span></p>
+                    <p><strong>公钥:</strong> <span id="reg-public-key"></span></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 投票区域 -->
+        <div class="card hidden" id="voting-section">
+            <div class="card-header">投票</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">选择您的投票选项</label>
+                    <select class="form-select" id="vote-option">
+                        <option value="A">选项 A</option>
+                        <option value="B">选项 B</option>
+                        <option value="C">选项 C</option>
+                    </select>
+                </div>
+                <button class="btn btn-success" onclick="submitVote()">提交投票</button>
+            </div>
+        </div>
+
+        <!-- 投票信息显示 -->
+        <div class="card hidden" id="vote-info">
+            <div class="card-header">投票信息</div>
+            <div class="card-body">
+                <p><strong>投票选项:</strong> <span id="vote-option-selected"></span></p>
+                <p><strong>证明 (proof):</strong></p>
+                <pre id="vote-proof"></pre>
+            </div>
+        </div>
+
+        <!-- 结果显示 -->
+        <div class="card" id="results-section">
+            <div class="card-header">投票结果</div>
+            <div class="card-body">
+                <canvas id="results-chart"></canvas>
+                <div id="voting-stats" class="mt-3"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 引入必要的脚本 -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        let currentVoter = null;
+        let resultsChart = null;
+        let tempLoginData = null;
+        let currentChallenge = null;
+
+        // 添加计算日志
+        function addCalculationLog(step) {
+            const logList = document.getElementById('calculation-log');
+            const logItem = document.createElement('li');
+            logItem.textContent = step;
+            logList.appendChild(logItem);
+        }
+
+        // 清除计算日志
+        function clearCalculationLog() {
+            document.getElementById('calculation-log').innerHTML = '';
+        }
+
+        // 请求挑战函数
+        async function requestChallenge() {
+            const publicKey = document.getElementById('public-key').value.trim();
+            const Commitment = document.getElementById('commitment').value.trim();
+
+            if (!publicKey) {
+                alert('请填写公钥');
+                return;
+            }
+
+            clearCalculationLog();
+            try {
+                const response = await fetch('/api/request-challenge', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ public_key: publicKey, commitment: Commitment }),
+                });
+    
+                const data = await response.json();
+                
+                console.log('Challenge response:', data);
+                if (data.success) {
+                    currentChallenge = data.data.challenge.challenge;                        
+                } else {
+                    alert('挑战请求失败：' + (data.error || '未知错误'));
+                }
+            } catch (error) {
+                alert('挑战请求失败：' + error.message);
+                console.error('Challenge error:', error);
+            }
+
+            addCalculationLog(`收到服务器的挑战值 c = ${currentChallenge}`);
+            document.getElementById('login-step1').classList.add('hidden');
+            document.getElementById('login-step2').classList.remove('hidden');
+
+        }
+
+        // 计算证明函数
+        async function calculateProof() {
+            if (!currentChallenge) {
+                alert('请先获取挑战值');
+                return;
+            }
+            const privateKey = document.getElementById('private-key').value.trim();
+            const randomVal = document.getElementById('random-k').value.trim();
+            const publicKey = document.getElementById('public-key').value.trim();
+            const Commitment = document.getElementById('commitment').value.trim();
+
+            if (!privateKey || !randomVal) {
+                alert('请输入私钥和随机数');
+                return;
+            }
+
+            try {
+                // 计算 response = randomVal + currentChallenge * privateKey
+                const responseValue = BigInt(randomVal) + BigInt(currentChallenge) * BigInt(privateKey);
+                addCalculationLog(`计算证明值 s = ${randomVal} + ${currentChallenge} * ${privateKey} = ${responseValue}`);
+                addCalculationLog(`计算证明值 s = ${responseValue}`);
+
+                // 将数据存储到 tempLoginData，后续用于提交证明
+                tempLoginData = {
+                    public_key: publicKey || '',         // 根据实际业务逻辑填写
+                    private_key: privateKey,
+                    Commitment: Commitment,
+                    Response: responseValue.toString(),
+                    s: responseValue,
+                };
+
+                // 显示证明值到页面
+                document.getElementById('proof-value').textContent = responseValue;
+
+                // 切换到第三步
+                document.getElementById('login-step2').classList.add('hidden');
+                document.getElementById('login-step3').classList.remove('hidden');
+            } catch (error) {
+                alert('计算证明失败：' + error.message);
+                console.error('Proof calculation error:', error);
+            }
+        }
+        // 提交证明，登录
+        async function submitProof() {
+            if (!tempLoginData || !tempLoginData.s) {
+                alert('请先计算证明');
+                return;
+            }
+
+            try {
+                addCalculationLog('提交证明到服务器进行验证');
+                console.log(tempLoginData);
+                // 构造要发送到服务器的证明数据
+                const proofData = {
+                    public_key: tempLoginData.public_key,
+                    proof: {
+                        commitment: tempLoginData.Commitment,
+                        response: tempLoginData.Response,
+                        challenge: currentChallenge,
+                    }
+                    }
+                const response = await fetch('/api/verify-identity', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(proofData),
+                });
+
+                const data = await response.json();
+
+                console.log('Proof submission response:', data);
+                if (data.success) {
+                    addCalculationLog('服务器验证通过');
+                    // 显示登录成功信息
+                    alert('登录成功')
+                    // 保存登录状态
+                    currentVoter = {
+                        public_key: tempLoginData.public_key,
+                        private_key: tempLoginData.private_key,
+                        proof_data: proofData,
+                    };
+                    
+                    // 显示投票相关界面
+                    document.getElementById('registration-info').classList.remove('hidden');
+                    document.getElementById('voting-section').classList.remove('hidden');
+
+                    // 清理临时数据
+                    currentChallenge = null;
+                    tempLoginData = null;
+
+                    // 重置登录界面
+                    document.getElementById('login-step1').classList.remove('hidden');
+                    document.getElementById('login-step2').classList.add('hidden');
+                    document.getElementById('login-step3').classList.add('hidden');
+                }else {
+                    addCalculationLog('服务器验证失败');
+                    alert('登录失败');
+                }
+            } catch (error) {
+                alert('登录失败：' + error.message);
+                console.error('Login error:', error);
+            }
+        }
+
+
+    
+        function updateResultsChart(results) {
+            const ctx = document.getElementById('results-chart').getContext('2d');
+            const labels = Object.keys(results || {});
+            const data = Object.values(results || {});
+    
+            if (resultsChart) {
+                resultsChart.destroy();
+            }
+    
+            resultsChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '投票数',
+                        data: data,
+                        backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            precision: 0
+                        }
+                    }
+                }
+            });
+        }
+    
+        function updateStatistics(stats = {}) {
+            const statsDiv = document.getElementById('voting-stats');
+            statsDiv.innerHTML = `
+                <p>总投票数: ${stats.total_votes || 0}</p>
+                <p>投票状态: ${stats.is_open ? '进行中' : '已结束'}</p>
+                ${stats.is_open && stats.time_remaining != null ? `<p>剩余时间: ${Math.ceil(stats.time_remaining)} 秒</p>` : ''}
+            `;
+        }
+    
+        async function updateResults() {
+            try {
+                const response = await fetch('/api/results');
+                const data = await response.json();
+                if (data.success && data.data) {
+                    const results = data.data.results || {};
+                    const statistics = data.data.statistics || {};
+                    updateResultsChart(results);
+                    updateStatistics(statistics);
+                }
+            } catch (error) {
+                console.error('更新结果失败：', error);
+            }
+        }
+    
+        async function registerVoter() {
+            const voterId = document.getElementById('voter-id').value.trim();
+            if (!voterId) {
+                alert('请输入有效的投票者ID。');
+                return;
+            }
+            try {
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ voter_id: voterId }),
+                });
+    
+                const data = await response.json();
+                console.log('Registration response:', data);
+    
+                if (data.success) {
+                    alert('注册成功！请保存您的投票凭证。');
+
+                    document.getElementById('reg-voter-id').innerText = data.data.voter_id;
+                    document.getElementById('reg-random-value').innerText = data.data.vote_randomness;
+                    document.getElementById('reg-commitment').innerText = data.data.commitment;
+                    document.getElementById('reg-public-key').innerText = data.data.public_key;
+                    document.getElementById('reg-private-key').innerText = data.data.private_key;
+                    
+                    document.getElementById('registration-info').classList.remove('hidden');
+                    document.getElementById('voting-section').classList.remove('hidden');
+                    
+                } else {
+                    alert('注册失败：' + (data.error || '未知错误'));
+                }
+            } catch (error) {
+                alert('注册失败：' + error.message);
+                console.error('Registration error:', error);
+            }
+        }
+    
+        async function submitVote() {
+            if (!currentVoter) {
+                alert('请先登录！');
+                return;
+            }
+
+            try {
+                const voteOption = document.getElementById('vote-option').value;
+
+                // const identityProof = await identityResponse.json();
+                // console.log('Identity proof:', identityProof);
+
+                // currentVoter = {
+                //         public_key: tempLoginData.public_key,
+                //         private_key: tempLoginData.private_key,
+                //         proof_data: proofData,
+                //     };
+
+                // 投票
+                const voteResponse = await fetch('/api/vote', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        public_key: currentVoter.public_key,
+                        vote: voteOption,
+                        identity_proof: currentVoter.proof_data
+                    }),
+                });
+
+                // // 构造投票证明数据
+                // const vote_proof = {
+                //     commitment: prepareResult.data.commitment,
+                //     randomness: prepareResult.data.proof_data.randomness
+                // };
+
+                // console.log('Constructed vote proof:', vote_proof);
+
+                // 构造完整的投票数据
+                // const voteData = {
+                //     voter_id: currentVoter.voter_id,
+                //     vote: voteOption,
+                //     vote_proof: vote_proof,  // 直接使用构造的 vote_proof
+                //     identity_proof: identityProof.data,
+                //     public_key: currentVoter.public_key
+                // };
+                
+                // console.log('Submitting vote with data:', JSON.stringify(voteData, null, 2));
+
+                // const voteResponse = await fetch('/api/vote', {
+                //     method: 'POST',
+                //     headers: {
+                //         'Content-Type': 'application/json',
+                //     },
+                //     body: JSON.stringify(voteData),
+                // });
+
+                // 检查响应状态
+                if (!voteResponse.ok) {
+                    const errorData = await voteResponse.json();
+                    throw new Error(errorData.error || '投票提交失败');
+                }
+
+                const result = await voteResponse.json();
+                console.log('Vote submission result:', result);
+
+                if (result.success) {
+                    alert('投票成功！');
+                    // 更新投票信息显示
+                    document.getElementById('vote-option-selected').innerText = voteOption;
+                    // document.getElementById('vote-proof').innerText = JSON.stringify(vote_proof, null, 2);
+                    document.getElementById('vote-info').classList.remove('hidden');
+                    // 更新结果显示
+                    updateResults();
+                } else {
+                    throw new Error(result.error || '投票失败');
+                }
+            } catch (error) {
+                console.error('Vote submission error:', error);
+                alert('投票失败：' + error.message);
+            }
+        }
+
+        async function startVoting() {
+            try {
+                const duration = prompt("请输入投票持续时间（秒）:", "60");
+                const durationSec = parseInt(duration);
+                if (isNaN(durationSec) || durationSec <= 0) {
+                    alert('请输入有效的持续时间（正整数）。');
+                    return;
+                }
+    
+                const response = await fetch('/api/start', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ duration: durationSec }),
+                });
+                const data = await response.json();
+                if (data.success) {
+                    alert('投票已开始！');
+                    updateResults();
+                } else {
+                    alert('开始投票失败：' + data.error);
+                }
+            } catch (error) {
+                alert('开始投票失败：' + error);
+            }
+        }
+    
+        async function endVoting() {
+            try {
+                const response = await fetch('/api/end', {
+                    method: 'POST',
+                });
+                const data = await response.json();
+                if (data.success) {
+                    alert('投票已结束！');
+                    updateResults();
+                } else {
+                    alert('结束投票失败：' + data.error);
+                }
+            } catch (error) {
+                alert('结束投票失败：' + error);
+            }
+        }
+    
+        // 定期更新结果
+        setInterval(updateResults, 5000);
+    
+        // 页面加载时获取最新结果
+        window.onload = updateResults;
+    </script>
+</body>
+</html>
